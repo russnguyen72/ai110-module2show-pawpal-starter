@@ -2,6 +2,8 @@
 
 ## 1. System Design
 
+Three core actions that this app should be able to handle are a user adding pets that they want to keep track of, adding tasks that a user wants to do with their pets (e.g. scheduled walks, vet visits, purchasing food, visiting the groomer etc.), and seeing the tasks that are assigned either to each specific pets or tasks in general.
+
 **a. Initial design**
 
 - Briefly describe your initial UML design.
