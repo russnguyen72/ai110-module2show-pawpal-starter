@@ -9,10 +9,14 @@ Three core actions that this app should be able to handle are a user adding pets
 - Briefly describe your initial UML design.
 - What classes did you include, and what responsibilities did you assign to each?
 
+My initial UML design that I brainstormed had 4 classes. These classes were Owner, Pet, Task, and Scheduler. The Owner class initially only had a list of pets, with a methods to add and remove pets from the list. The Pet class had identifying information as well as a list of tasks that each pet had. There were methods to update the last vet visit, add a task, remove a task, and update a given task. The Task class had an ID, description, and priority, with methods to modify description and priority. The Scheduler class has a pet that its attached to and a queue of Tasks that are waiting to be automatically added to each pet, with methods to add or remove a scheduled task, modify the frequency of the repeated task, and a method to automatically append a queued task to a pet.
+
 **b. Design changes**
 
 - Did your design change during implementation?
 - If yes, describe at least one change and why you made it.
+
+My design changed a lot during implementation. One change that occured was that priority within the Task class was removed. I made this change because each Task has a specific time designated for it to occur, and because of each Task having a designated time, there should be no time period where two Tasks are happening simultaneously. Therefore, due to the specificity of when Tasks are occuring, priority got removed.
 
 ---
 
