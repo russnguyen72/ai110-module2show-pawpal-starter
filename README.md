@@ -45,3 +45,17 @@ pip install -r requirements.txt
 ## Smarter Scheduling
 
 Within the app, it can filter tasks displayed by a specific pet, whether a task is pending or completed, or a combination of both. It can also sort tasks by time, even if it is not inserted in time order.
+
+## Testing PawPal+
+
+```bash
+python -m pytest tests/test_pawpal.py
+```
+
+The test suite provided tests a myriad of different functions with different edge cases. It tests all methods of each class. 
+- Task: Tests update methods
+- Pet: Tests adding and removing tasks safely, as well as updating a non-existent task ID safely without crashing. 
+- Scheduler: Tests pet management, task retrival, due date filtering, sorting time in ascending order, recurring time completion, edge cases for when there is unknown pet or unknown task, and conflict detection. 
+- Owner, it tests adding a pet adds to both Owner and Scheduler's pet list, remvoing a pet removes from both, and both pet list fields reference the same list object.
+
+**Confidence Level:** ⭐⭐⭐⭐⭐
