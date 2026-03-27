@@ -1,9 +1,19 @@
 from __future__ import annotations
+import json
 import uuid
 from dataclasses import dataclass, field
 from datetime import date, time, timedelta
 from enum import Enum
 from itertools import groupby
+
+
+def _validated_str(value: object, field_name: str, max_length: int = 500) -> str:
+    """Raises ValueError if value is not a string or exceeds max_length."""
+    if not isinstance(value, str):
+        raise ValueError(f"'{field_name}' must be a string, got {type(value).__name__}")
+    if len(value) > max_length:
+        raise ValueError(f"'{field_name}' exceeds the {max_length}-character limit")
+    return value
 
 
 class TaskStatus(Enum):
@@ -204,3 +214,130 @@ class Owner:
     def remove_pet(self, pet_id: str) -> None:
         """Removes the pet matching pet_id from the owner's list and the scheduler simultaneously."""
         self.pets[:] = [p for p in self.pets if p.id != pet_id]
+
+    # --- Persistence ---
+
+    def to_dict(self) -> dict:
+        """Serializes the owner and all pets and tasks to a plain dictionary."""
+        return {
+            "id": self.id,
+            "pets": [
+                {
+                    "id": p.id,
+                    "name": p.name,
+                    "animal_type": p.animal_type,
+                    "last_vet_visit": str(p.last_vet_visit) if p.last_vet_visit else None,
+                    "tasks": [
+                        {
+                            "id": t.id,
+                            "name": t.name,
+                            "description": t.description,
+                            "scheduled_time": t.scheduled_time.strftime("%H:%M"),
+                            "frequency_days": t.frequency_days,
+                            "status": t.status.value,
+                            "next_due_date": str(t.next_due_date),
+                        }
+                        for t in p.tasks
+                    ],
+                }
+                for p in self.pets
+            ],
+        }
+
+    def to_json(self) -> str:
+        """Serializes the owner to a JSON string."""
+        return json.dumps(self.to_dict(), indent=2)
+
+    def save_to_json(self, filepath: str) -> None:
+        """Writes the owner's data to a JSON file at the given path."""
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(self.to_json())
+
+    @classmethod
+    def from_dict(cls, data: object) -> Owner:
+        """Deserializes an Owner from a plain dictionary, validating every field."""
+        if not isinstance(data, dict):
+            raise ValueError("JSON root must be an object")
+
+        owner_id = _validated_str(data.get("id"), "owner.id")
+
+        pets_raw = data.get("pets", [])
+        if not isinstance(pets_raw, list):
+            raise ValueError("'pets' must be a list")
+
+        owner = cls(id=owner_id)
+
+        for i, pet_raw in enumerate(pets_raw):
+            if not isinstance(pet_raw, dict):
+                raise ValueError(f"pets[{i}] must be an object")
+
+            pet_id      = _validated_str(pet_raw.get("id"),          f"pets[{i}].id")
+            pet_name    = _validated_str(pet_raw.get("name"),        f"pets[{i}].name")
+            animal_type = _validated_str(pet_raw.get("animal_type"), f"pets[{i}].animal_type")
+
+            last_vet_raw = pet_raw.get("last_vet_visit")
+            if last_vet_raw is not None:
+                try:
+                    last_vet_visit = date.fromisoformat(_validated_str(last_vet_raw, f"pets[{i}].last_vet_visit"))
+                except ValueError:
+                    raise ValueError(f"pets[{i}].last_vet_visit is not a valid YYYY-MM-DD date")
+            else:
+                last_vet_visit = None
+
+            pet = Pet(id=pet_id, name=pet_name, animal_type=animal_type, last_vet_visit=last_vet_visit)
+
+            tasks_raw = pet_raw.get("tasks", [])
+            if not isinstance(tasks_raw, list):
+                raise ValueError(f"pets[{i}].tasks must be a list")
+
+            for j, task_raw in enumerate(tasks_raw):
+                loc = f"pets[{i}].tasks[{j}]"
+                if not isinstance(task_raw, dict):
+                    raise ValueError(f"{loc} must be an object")
+
+                task_id   = _validated_str(task_raw.get("id"),          f"{loc}.id")
+                task_name = _validated_str(task_raw.get("name"),        f"{loc}.name")
+                task_desc = _validated_str(task_raw.get("description"), f"{loc}.description")
+
+                time_str = _validated_str(task_raw.get("scheduled_time"), f"{loc}.scheduled_time")
+                try:
+                    scheduled_time = time.fromisoformat(time_str)
+                except ValueError:
+                    raise ValueError(f"{loc}.scheduled_time '{time_str}' is not a valid HH:MM time")
+
+                freq = task_raw.get("frequency_days", 0)
+                if isinstance(freq, bool) or not isinstance(freq, int) or freq < 0:
+                    raise ValueError(f"{loc}.frequency_days must be a non-negative integer")
+
+                status_str = _validated_str(task_raw.get("status", "pending"), f"{loc}.status")
+                try:
+                    status = TaskStatus(status_str)
+                except ValueError:
+                    raise ValueError(f"{loc}.status '{status_str}' is not a valid TaskStatus value")
+
+                due_str = _validated_str(task_raw.get("next_due_date"), f"{loc}.next_due_date")
+                try:
+                    next_due_date = date.fromisoformat(due_str)
+                except ValueError:
+                    raise ValueError(f"{loc}.next_due_date '{due_str}' is not a valid YYYY-MM-DD date")
+
+                pet.add_task(Task(
+                    id=task_id,
+                    name=task_name,
+                    description=task_desc,
+                    scheduled_time=scheduled_time,
+                    frequency_days=freq,
+                    status=status,
+                    next_due_date=next_due_date,
+                ))
+
+            owner.add_pet(pet)
+
+        return owner
+
+    @classmethod
+    def load_from_json(cls, filepath: str) -> Owner:
+        """Reads a JSON file and deserializes it into an Owner, validating every field."""
+        with open(filepath, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return cls.from_dict(data)

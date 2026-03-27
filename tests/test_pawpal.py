@@ -1,3 +1,4 @@
+import json
 import pytest
 from datetime import date, time, timedelta
 from pawpal_system import Owner, Pet, Task, TaskStatus, Scheduler
@@ -390,3 +391,229 @@ class TestOwner:
     def test_owner_and_scheduler_share_same_list(self):
         owner = Owner(id="owner-1")
         assert owner.pets is owner.scheduler.pets
+
+
+# ─── Owner persistence helpers ────────────────────────────────────────────────
+
+def _task_dict(**overrides):
+    base = {
+        "id": "t1", "name": "Morning Walk", "description": "Walk around the block",
+        "scheduled_time": "08:00", "frequency_days": 1,
+        "status": "pending", "next_due_date": "2025-01-01",
+    }
+    return {**base, **overrides}
+
+def _pet_dict(tasks=None, **overrides):
+    base = {"id": "p1", "name": "Buddy", "animal_type": "dog", "last_vet_visit": None, "tasks": tasks or []}
+    return {**base, **overrides}
+
+def _owner_dict(pets=None, **overrides):
+    base = {"id": "o1", "pets": pets or []}
+    return {**base, **overrides}
+
+
+# ─── Owner persistence ────────────────────────────────────────────────────────
+
+class TestOwnerPersistence:
+
+    @pytest.fixture
+    def owner_with_data(self):
+        owner = Owner(id="owner-1")
+        pet = Pet(id="pet-1", name="Buddy", animal_type="Dog", last_vet_visit=date(2025, 1, 15))
+        pet.add_task(Task(
+            id="task-1", name="Morning Walk", description="Walk",
+            scheduled_time=time(8, 0), frequency_days=1,
+        ))
+        pet.add_task(Task(
+            id="task-2", name="Flea Treatment", description="Apply treatment",
+            scheduled_time=time(9, 0), frequency_days=30,
+            status=TaskStatus.COMPLETED, next_due_date=date(2025, 2, 15),
+        ))
+        owner.add_pet(pet)
+        return owner
+
+    # --- to_dict / to_json ---
+
+    def test_to_dict_contains_owner_id(self, owner_with_data):
+        assert owner_with_data.to_dict()["id"] == "owner-1"
+
+    def test_to_dict_contains_pet(self, owner_with_data):
+        assert owner_with_data.to_dict()["pets"][0]["name"] == "Buddy"
+
+    def test_to_dict_contains_all_tasks(self, owner_with_data):
+        assert len(owner_with_data.to_dict()["pets"][0]["tasks"]) == 2
+
+    def test_to_dict_serializes_scheduled_time_as_hhmm(self, owner_with_data):
+        task = owner_with_data.to_dict()["pets"][0]["tasks"][0]
+        assert task["scheduled_time"] == "08:00"
+
+    def test_to_dict_serializes_completed_status(self, owner_with_data):
+        tasks = owner_with_data.to_dict()["pets"][0]["tasks"]
+        completed = next(t for t in tasks if t["id"] == "task-2")
+        assert completed["status"] == "completed"
+
+    def test_to_dict_serializes_last_vet_visit(self, owner_with_data):
+        assert owner_with_data.to_dict()["pets"][0]["last_vet_visit"] == "2025-01-15"
+
+    def test_to_dict_null_last_vet_visit_when_none(self):
+        owner = Owner(id="o1")
+        owner.add_pet(Pet(id="p1", name="Mochi", animal_type="cat"))
+        assert owner.to_dict()["pets"][0]["last_vet_visit"] is None
+
+    def test_to_json_produces_valid_json(self, owner_with_data):
+        result = json.loads(owner_with_data.to_json())
+        assert isinstance(result, dict)
+
+    def test_to_json_round_trips_owner_id(self, owner_with_data):
+        assert json.loads(owner_with_data.to_json())["id"] == "owner-1"
+
+    # --- save / load round-trip ---
+
+    def test_roundtrip_preserves_owner_id(self, owner_with_data, tmp_path):
+        path = str(tmp_path / "save.json")
+        owner_with_data.save_to_json(path)
+        assert Owner.load_from_json(path).id == "owner-1"
+
+    def test_roundtrip_preserves_pet_name(self, owner_with_data, tmp_path):
+        path = str(tmp_path / "save.json")
+        owner_with_data.save_to_json(path)
+        assert Owner.load_from_json(path).pets[0].name == "Buddy"
+
+    def test_roundtrip_preserves_task_count(self, owner_with_data, tmp_path):
+        path = str(tmp_path / "save.json")
+        owner_with_data.save_to_json(path)
+        assert len(Owner.load_from_json(path).pets[0].tasks) == 2
+
+    def test_roundtrip_preserves_scheduled_time(self, owner_with_data, tmp_path):
+        path = str(tmp_path / "save.json")
+        owner_with_data.save_to_json(path)
+        assert Owner.load_from_json(path).pets[0].tasks[0].scheduled_time == time(8, 0)
+
+    def test_roundtrip_preserves_completed_status(self, owner_with_data, tmp_path):
+        path = str(tmp_path / "save.json")
+        owner_with_data.save_to_json(path)
+        loaded_tasks = Owner.load_from_json(path).pets[0].tasks
+        completed = next(t for t in loaded_tasks if t.id == "task-2")
+        assert completed.status == TaskStatus.COMPLETED
+
+    def test_roundtrip_preserves_last_vet_visit(self, owner_with_data, tmp_path):
+        path = str(tmp_path / "save.json")
+        owner_with_data.save_to_json(path)
+        assert Owner.load_from_json(path).pets[0].last_vet_visit == date(2025, 1, 15)
+
+    def test_roundtrip_preserves_frequency_days(self, owner_with_data, tmp_path):
+        path = str(tmp_path / "save.json")
+        owner_with_data.save_to_json(path)
+        assert Owner.load_from_json(path).pets[0].tasks[1].frequency_days == 30
+
+    def test_roundtrip_loaded_owner_scheduler_shares_pets_list(self, owner_with_data, tmp_path):
+        path = str(tmp_path / "save.json")
+        owner_with_data.save_to_json(path)
+        loaded = Owner.load_from_json(path)
+        assert loaded.pets is loaded.scheduler.pets
+
+    # --- load_from_json file-level edge cases ---
+
+    def test_load_from_json_file_not_found_raises(self, tmp_path):
+        with pytest.raises(FileNotFoundError):
+            Owner.load_from_json(str(tmp_path / "nonexistent.json"))
+
+    def test_load_from_json_empty_file_raises(self, tmp_path):
+        path = tmp_path / "empty.json"
+        path.write_text("")
+        with pytest.raises(Exception):  # json.JSONDecodeError
+            Owner.load_from_json(str(path))
+
+    def test_load_from_json_malformed_json_raises(self, tmp_path):
+        path = tmp_path / "bad.json"
+        path.write_text("{not: valid, json}")
+        with pytest.raises(Exception):
+            Owner.load_from_json(str(path))
+
+    def test_load_from_json_valid_json_wrong_structure_raises(self, tmp_path):
+        path = tmp_path / "list.json"
+        path.write_text('["this", "is", "a", "list"]')
+        with pytest.raises(ValueError):
+            Owner.load_from_json(str(path))
+
+    # --- from_dict — owner-level validation ---
+
+    def test_from_dict_rejects_list_root(self):
+        with pytest.raises(ValueError):
+            Owner.from_dict([])
+
+    def test_from_dict_rejects_string_root(self):
+        with pytest.raises(ValueError):
+            Owner.from_dict("not a dict")
+
+    def test_from_dict_rejects_non_string_owner_id(self):
+        with pytest.raises(ValueError):
+            Owner.from_dict(_owner_dict(id=123))
+
+    def test_from_dict_rejects_owner_id_exceeding_max_length(self):
+        with pytest.raises(ValueError):
+            Owner.from_dict(_owner_dict(id="x" * 501))
+
+    def test_from_dict_rejects_non_list_pets(self):
+        with pytest.raises(ValueError):
+            Owner.from_dict(_owner_dict(pets="not a list"))
+
+    # --- from_dict — pet-level validation ---
+
+    def test_from_dict_rejects_non_dict_pet(self):
+        with pytest.raises(ValueError):
+            Owner.from_dict(_owner_dict(pets=["not a dict"]))
+
+    def test_from_dict_rejects_non_string_pet_name(self):
+        with pytest.raises(ValueError):
+            Owner.from_dict(_owner_dict(pets=[_pet_dict(name=42)]))
+
+    def test_from_dict_rejects_non_string_animal_type(self):
+        with pytest.raises(ValueError):
+            Owner.from_dict(_owner_dict(pets=[_pet_dict(animal_type=True)]))
+
+    def test_from_dict_rejects_invalid_last_vet_visit(self):
+        with pytest.raises(ValueError):
+            Owner.from_dict(_owner_dict(pets=[_pet_dict(last_vet_visit="not-a-date")]))
+
+    def test_from_dict_rejects_non_list_tasks(self):
+        with pytest.raises(ValueError):
+            Owner.from_dict(_owner_dict(pets=[_pet_dict(tasks="not a list")]))
+
+    # --- from_dict — task-level validation ---
+
+    def test_from_dict_rejects_non_dict_task(self):
+        with pytest.raises(ValueError):
+            Owner.from_dict(_owner_dict(pets=[_pet_dict(tasks=["not a dict"])]))
+
+    def test_from_dict_rejects_non_string_task_name(self):
+        with pytest.raises(ValueError):
+            Owner.from_dict(_owner_dict(pets=[_pet_dict(tasks=[_task_dict(name=99)])]))
+
+    def test_from_dict_rejects_invalid_scheduled_time_value(self):
+        with pytest.raises(ValueError):
+            Owner.from_dict(_owner_dict(pets=[_pet_dict(tasks=[_task_dict(scheduled_time="99:99")])]))
+
+    def test_from_dict_rejects_non_string_scheduled_time(self):
+        with pytest.raises(ValueError):
+            Owner.from_dict(_owner_dict(pets=[_pet_dict(tasks=[_task_dict(scheduled_time=800)])]))
+
+    def test_from_dict_rejects_negative_frequency_days(self):
+        with pytest.raises(ValueError):
+            Owner.from_dict(_owner_dict(pets=[_pet_dict(tasks=[_task_dict(frequency_days=-1)])]))
+
+    def test_from_dict_rejects_bool_frequency_days(self):
+        with pytest.raises(ValueError):
+            Owner.from_dict(_owner_dict(pets=[_pet_dict(tasks=[_task_dict(frequency_days=True)])]))
+
+    def test_from_dict_rejects_float_frequency_days(self):
+        with pytest.raises(ValueError):
+            Owner.from_dict(_owner_dict(pets=[_pet_dict(tasks=[_task_dict(frequency_days=1.5)])]))
+
+    def test_from_dict_rejects_unknown_status(self):
+        with pytest.raises(ValueError):
+            Owner.from_dict(_owner_dict(pets=[_pet_dict(tasks=[_task_dict(status="in_progress")])]))
+
+    def test_from_dict_rejects_invalid_next_due_date(self):
+        with pytest.raises(ValueError):
+            Owner.from_dict(_owner_dict(pets=[_pet_dict(tasks=[_task_dict(next_due_date="32-13-2025")])]))

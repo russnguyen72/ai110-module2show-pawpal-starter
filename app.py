@@ -1,3 +1,4 @@
+import json
 import uuid
 from datetime import time
 
@@ -101,6 +102,40 @@ owner: Owner = st.session_state.owner
 st.subheader("Quick Demo Inputs")
 
 st.text_input("Owner name", key="owner_name", value="Jordan")
+
+# ── Save / Load ────────────────────────────────────────────────────────────
+st.markdown("### Save / Load")
+
+@st.dialog("Load save file")
+def _load_dialog():
+    st.caption("Upload a previously saved PawPal+ JSON file.")
+    uploaded = st.file_uploader("", type=["json"], label_visibility="collapsed")
+    confirm_col, cancel_col = st.columns(2)
+    with confirm_col:
+        if st.button("Load", disabled=uploaded is None, type="primary", use_container_width=True):
+            try:
+                loaded_owner = Owner.from_dict(json.loads(uploaded.read().decode("utf-8")))
+                st.session_state.owner = loaded_owner
+                st.session_state.schedule = None
+                st.rerun()
+            except ValueError as e:
+                st.error(f"Could not load file: {e}")
+    with cancel_col:
+        if st.button("Cancel", use_container_width=True):
+            st.rerun()
+
+save_col, load_col = st.columns(2)
+with save_col:
+    st.download_button(
+        label="Download save file",
+        data=owner.to_json(),
+        file_name="pawpal_save.json",
+        mime="application/json",
+        use_container_width=True,
+    )
+with load_col:
+    if st.button("Load from file", use_container_width=True):
+        _load_dialog()
 
 st.markdown("### Pets")
 st.caption("Pets currently being tracked.")
