@@ -45,16 +45,55 @@ st.divider()
 
 # ── One-time initialization ────────────────────────────────────────────────
 if "owner" not in st.session_state:
+    from datetime import date
+    from pawpal_system import TaskStatus
+
     st.session_state.owner = Owner(id=str(uuid.uuid4()))
-    st.session_state.owner.add_pet(
-        Pet(id=str(uuid.uuid4()), name="Mochi", animal_type="dog")
-    )
+
+    mochi = Pet(id=str(uuid.uuid4()), name="Mochi", animal_type="dog")
+    mochi.add_task(Task(
+        id=str(uuid.uuid4()), name="Morning Walk",
+        description="30 min walk around the block",
+        scheduled_time=time(7, 30), frequency_days=1,
+    ))
+    mochi.add_task(Task(
+        id=str(uuid.uuid4()), name="Flea Treatment",
+        description="Apply monthly flea and tick treatment",
+        scheduled_time=time(9, 0), frequency_days=30,
+        status=TaskStatus.COMPLETED,
+        next_due_date=date.today(),
+    ))
+    mochi.add_task(Task(
+        id=str(uuid.uuid4()), name="Evening Walk",
+        description="15 min walk before sundown",
+        scheduled_time=time(17, 0), frequency_days=1,
+    ))
+
+    whiskers = Pet(id=str(uuid.uuid4()), name="Whiskers", animal_type="cat")
+    whiskers.add_task(Task(
+        id=str(uuid.uuid4()), name="Breakfast",
+        description="Half a can of wet food",
+        scheduled_time=time(9, 0), frequency_days=1,  # conflicts with Mochi's Flea Treatment
+    ))
+    whiskers.add_task(Task(
+        id=str(uuid.uuid4()), name="Lunchtime Play",
+        description="15 min with the feather wand",
+        scheduled_time=time(12, 0), frequency_days=1,
+        status=TaskStatus.COMPLETED,
+        next_due_date=date.today(),
+    ))
+    whiskers.add_task(Task(
+        id=str(uuid.uuid4()), name="Dinner",
+        description="Half a can of wet food",
+        scheduled_time=time(18, 30), frequency_days=1,
+    ))
+
+    st.session_state.owner.add_pet(mochi)
+    st.session_state.owner.add_pet(whiskers)
 
 if "schedule" not in st.session_state:
     st.session_state.schedule = None
 
-if "schedule_label" not in st.session_state:
-    st.session_state.schedule_label = None
 
 owner: Owner = st.session_state.owner
 
@@ -131,24 +170,6 @@ if owner.pets:
 
     if st.button("Add task"):
         _add_task()
-
-    all_tasks = [(p, t) for p in owner.pets for t in p.tasks]
-    if all_tasks:
-        st.write("Current tasks:")
-        st.table([
-            {
-                "Pet": p.name,
-                "Name": t.name,
-                "Description": t.description,
-                "Scheduled time": t.scheduled_time.strftime("%H:%M"),
-                "Repeats every (days)": t.frequency_days if t.frequency_days else "one-time",
-                "Status": t.status.value,
-                "Next due": str(t.next_due_date),
-            }
-            for p, t in all_tasks
-        ])
-    else:
-        st.info("No tasks yet. Add one above.")
 else:
     st.info("Add a pet above before adding tasks.")
 
@@ -156,21 +177,11 @@ st.divider()
 
 # ── Build Schedule ─────────────────────────────────────────────────────────
 st.subheader("Build Schedule")
-st.caption("Generates a time-ordered schedule for one or all pets.")
+st.caption("Generates a time-ordered schedule across all pets.")
 
 if owner.pets:
-    schedule_options = [p.name for p in owner.pets] + ["All pets"]
-
     def _generate_schedule():
-        selected = st.session_state.schedule_for
-        all_sorted = owner.scheduler.get_tasks_sorted_by_time()
-        st.session_state.schedule = (
-            all_sorted if selected == "All pets"
-            else [(p, t) for p, t in all_sorted if p.name == selected]
-        )
-        st.session_state.schedule_label = selected
-
-    st.selectbox("Schedule for", schedule_options, key="schedule_for")
+        st.session_state.schedule = owner.scheduler.get_tasks_sorted_by_time()
 
     if st.button("Generate schedule"):
         _generate_schedule()
@@ -178,19 +189,42 @@ if owner.pets:
     if st.session_state.schedule is not None:
         if st.session_state.schedule:
             owner_label = st.session_state.get("owner_name", "")
-            scope_label = st.session_state.get("schedule_label", "All pets")
-            st.success(f"Schedule for **{owner_label}** — **{scope_label}**")
-            st.table([
-                {
-                    "Pet": p.name,
-                    "Time": t.scheduled_time.strftime("%H:%M"),
-                    "Task": t.name,
-                    "Description": t.description,
-                    "Status": t.status.value,
-                    "Next due": str(t.next_due_date),
-                }
-                for p, t in st.session_state.schedule
-            ])
+            st.success(f"Schedule for **{owner_label}**'s pets")
+
+            filter_col1, filter_col2 = st.columns(2)
+            with filter_col1:
+                st.selectbox("Filter by pet", ["All pets"] + [p.name for p in owner.pets], key="task_filter_pet")
+            with filter_col2:
+                st.selectbox("Filter by status", ["All", "Pending", "Completed"], key="task_filter_status")
+
+            filter_pet    = st.session_state.get("task_filter_pet", "All pets")
+            filter_status = st.session_state.get("task_filter_status", "All")
+
+            display_schedule = [
+                (p, t) for p, t in st.session_state.schedule
+                if (filter_pet    == "All pets"   or p.name == filter_pet)
+                if (filter_status == "All"        or t.status.value.lower() == filter_status.lower())
+            ]
+
+            if display_schedule:
+                st.table([
+                    {
+                        "Pet": p.name,
+                        "Time": t.scheduled_time.strftime("%H:%M"),
+                        "Task": t.name,
+                        "Description": t.description,
+                        "Status": t.status.value,
+                        "Next due": str(t.next_due_date),
+                    }
+                    for p, t in display_schedule
+                ])
+            else:
+                st.info("No tasks match the current filter.")
+
+            conflicts = owner.scheduler.get_scheduling_conflicts()
+            if conflicts:
+                for conflict in conflicts:
+                    st.warning(f"Time conflict: {conflict}")
         else:
             st.warning("No tasks to schedule for this selection.")
 else:

@@ -42,9 +42,30 @@ pip install -r requirements.txt
 6. Connect your logic to the Streamlit UI in `app.py`.
 7. Refine UML so it matches what you actually built.
 
-## Smarter Scheduling
+## Features
 
-Within the app, it can filter tasks displayed by a specific pet, whether a task is pending or completed, or a combination of both. It can also sort tasks by time, even if it is not inserted in time order.
+### Pet & Owner Management
+- Register an owner and track multiple pets, each with a name and species
+- Add pets at any time from the UI; the scheduler gains visibility into new pets instantly via a shared list reference between `Owner` and `Scheduler`
+- The pet tracking table shows each pet's name, species, and current task count at a glance
+
+### Task Management
+- Add tasks to a single pet or to all pets simultaneously with one action
+- Each task stores a name, description, scheduled time, recurrence frequency (in days), completion status, and next due date
+- Recurring tasks (`frequency_days > 0`) automatically generate a new pending task for the next occurrence when marked complete, preserving the original as a permanent completed record
+- One-time tasks (`frequency_days = 0`) are simply marked complete with no follow-up task created
+
+### Schedule Generation
+- Generates a time-ordered schedule across all pets using a sort on `scheduled_time`, regardless of the order tasks were inserted
+- The generated schedule persists in session state and remains visible until explicitly regenerated, so changing filter controls does not trigger a re-query
+
+### Schedule Filtering
+- After a schedule is generated, filter the displayed results by pet, by completion status (All / Pending / Completed), or both simultaneously
+- Filters operate on the already-generated schedule in memory — no round-trip to the scheduler on each filter change
+
+### Conflict Detection
+- After schedule generation, the scheduler groups all tasks by `scheduled_time` using `itertools.groupby` and reports any time slot with more than one task scheduled across any pets
+- Conflicts are displayed as non-blocking warnings beneath the schedule table, identifying each conflicting task by name and pet
 
 ## Testing PawPal+
 
@@ -58,4 +79,8 @@ The test suite provided tests a myriad of different functions with different edg
 - Scheduler: Tests pet management, task retrival, due date filtering, sorting time in ascending order, recurring time completion, edge cases for when there is unknown pet or unknown task, and conflict detection. 
 - Owner, it tests adding a pet adds to both Owner and Scheduler's pet list, remvoing a pet removes from both, and both pet list fields reference the same list object.
 
-**Confidence Level:** ⭐⭐⭐⭐⭐
+**Confidence Level:** ⭐⭐⭐⭐
+
+## 📸 Demo
+
+<a href="screenshot.png" target="_blank"><img src='screenshot.png' title='PawPal App' width='' alt='PawPal App' class='center-block' /></a>
