@@ -1,7 +1,9 @@
 from __future__ import annotations
+import uuid
 from dataclasses import dataclass, field
 from datetime import date, time, timedelta
 from enum import Enum
+from itertools import groupby
 
 
 class TaskStatus(Enum):
@@ -114,6 +116,14 @@ class Scheduler:
                 return list(pet.tasks)
         return []
 
+    def get_pending_tasks_for_pet(self, pet_id: str) -> list[Task]:
+        """Returns all PENDING tasks for a specific pet, or an empty list if the pet is not found."""
+        return [t for t in self.get_tasks_for_pet(pet_id) if t.status == TaskStatus.PENDING]
+
+    def get_completed_tasks_for_pet(self, pet_id: str) -> list[Task]:
+        """Returns all COMPLETED tasks for a specific pet, or an empty list if the pet is not found."""
+        return [t for t in self.get_tasks_for_pet(pet_id) if t.status == TaskStatus.COMPLETED]
+
     def get_pending_tasks(self) -> list[tuple[Pet, Task]]:
         """Returns all PENDING tasks across all pets as (pet, task) pairs."""
         return [
@@ -121,12 +131,22 @@ class Scheduler:
             if task.status == TaskStatus.PENDING
         ]
 
-    def get_tasks_due_today_or_earlier(self) -> list[tuple[Pet, Task]]:
-        """Returns all tasks whose next_due_date is today or in the past, across all pets."""
+    def get_completed_tasks(self) -> list[tuple[Pet, Task]]:
+        """Returns all COMPLETED tasks across all pets as (pet, task) pairs."""
         return [
             (pet, task) for pet, task in self.get_all_tasks()
-            if date.today() >= task.next_due_date
+            if task.status == TaskStatus.COMPLETED
         ]
+
+    def get_tasks_due_today_or_earlier(self) -> list[tuple[Pet, Task]]:
+        """Returns all tasks whose next_due_date is today or in the past, across all pets."""
+        today = date.today()
+        return [(pet, task) for pet, task in self.get_all_tasks() if today >= task.next_due_date]
+
+    def get_tasks_due_today_or_earlier_for_pet(self, pet_id: str) -> list[Task]:
+        """Returns all tasks whose next_due_date is today or in the past for a specific pet."""
+        today = date.today()
+        return [t for t in self.get_tasks_for_pet(pet_id) if today >= t.next_due_date]
 
     # --- Task organization ---
 
@@ -134,16 +154,37 @@ class Scheduler:
         """Returns all tasks across all pets sorted ascending by scheduled_time."""
         return sorted(self.get_all_tasks(), key=lambda pair: pair[1].scheduled_time)
 
+    def get_scheduling_conflicts(self) -> list[str]:
+        """Returns a warning message for each time slot that has more than one task scheduled across any pets."""
+        warnings = []
+        sorted_tasks = sorted(self.get_all_tasks(), key=lambda pair: pair[1].scheduled_time)
+        for scheduled_time, group in groupby(sorted_tasks, key=lambda pair: pair[1].scheduled_time):
+            pairs = list(group)
+            if len(pairs) > 1:
+                labels = ", ".join(f"'{t.name}' ({p.name})" for p, t in pairs)
+                warnings.append(f"Conflict at {scheduled_time.strftime('%H:%M')}: {labels}")
+        return warnings
+
     # --- Task management ---
 
     def mark_task_complete(self, pet_id: str, task_id: str) -> None:
-        """Marks a task COMPLETED. If recurring, advances next_due_date by frequency_days."""
-        task = self._find_task(pet_id, task_id)
-        if task is None:
-            return
-        task.update_status(TaskStatus.COMPLETED)
-        if task.frequency_days > 0:
-            task.next_due_date += timedelta(days=task.frequency_days)
+        """Marks a task COMPLETED and, if recurring, adds a new PENDING task for the next occurrence."""
+        for pet in self.pets:
+            if pet.id == pet_id:
+                task = next((t for t in pet.tasks if t.id == task_id), None)
+                if task is None:
+                    return
+                task.update_status(TaskStatus.COMPLETED)
+                if task.frequency_days > 0:
+                    pet.add_task(Task(
+                        id=str(uuid.uuid4()),
+                        name=task.name,
+                        description=task.description,
+                        scheduled_time=task.scheduled_time,
+                        frequency_days=task.frequency_days,
+                        next_due_date=task.next_due_date + timedelta(days=task.frequency_days),
+                    ))
+                return
 
 
 @dataclass

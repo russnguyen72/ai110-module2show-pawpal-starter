@@ -32,6 +32,8 @@ My design changed a lot during implementation. One change that occured was that 
 - Describe one tradeoff your scheduler makes.
 - Why is that tradeoff reasonable for this scenario?
 
+One tradeoff my scheduler makes is checking exact time that a Task should be either done by or attempted, rather than a period of time for that task to be dealt with. I made this tradeoff because each task can have unpredictable time demands associated with them. For example, taking a pet to the vet may take more or less time depending on traffic or how busy the vet is, so checking for exact time makes it way more flexible than rigidly scheduling blocks of time off incase too little time is allotted.
+
 ---
 
 ## 3. AI Collaboration

@@ -41,3 +41,7 @@ pip install -r requirements.txt
 5. Add tests to verify key behaviors.
 6. Connect your logic to the Streamlit UI in `app.py`.
 7. Refine UML so it matches what you actually built.
+
+## Smarter Scheduling
+
+Within the app, it can filter tasks displayed by a specific pet, whether a task is pending or completed, or a combination of both. It can also sort tasks by time, even if it is not inserted in time order.
